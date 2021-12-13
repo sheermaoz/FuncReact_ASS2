@@ -1,40 +1,20 @@
-type Timestamp = number[];
-
-interface NeighborClient {
-    id : number;
-    client_host : string;
-    port : number;
-}
-
-interface UpdateOperation {
-    op : string;
-    char? : string;
-    index? : number;
-}
-
-interface ClientData {
-    id : number;
-    port : number;
-    local_replica : string;
-    clients : NeighborClient[];
-    operations : UpdateOperation[];
-}
+import * as tp from "./types";
 
 class Client {
     id : number;
     port : number;
     local_replica : string;
-    clients : NeighborClient[];
-    operations : UpdateOperation[];
+    clients : tp.NeighborClient[];
+    operations : tp.UpdateOperation[];
     // server : Server;
-    timestamp_vector: Timestamp;
+    timestamp_vector: tp.Timestamp;
     update_frequency : number;
     modification_counter : number = 0;
 
     //Ido - type management ("isDelete"/"isInsert" ....)
 
 
-    constructor(client : ClientData, update_frequency : number = 1) {
+    constructor(client : tp.ClientData, update_frequency : number = 1) {
         this.id = client.id;
         this.port = client.port;
         this.local_replica = client.local_replica;
