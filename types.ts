@@ -6,6 +6,8 @@ export interface NeighborClient {
     port : number;
 }
 
+
+
 export interface UpdateOperation {
     opName : string;
     char? : string;
@@ -33,3 +35,4 @@ export interface ClientData {
 }
 
 export const isDelete = (x : UpdateOperation) : x is DeleteOp => x.opName === "delete";
+export const isInsert = (x : UpdateOperation) : x is InserOp => x.opName === "insert";

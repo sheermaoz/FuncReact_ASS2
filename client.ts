@@ -1,20 +1,18 @@
-import * as tp from "./types";
+import * as T from "./types";
 
 class Client {
     id : number;
     port : number;
     local_replica : string;
-    clients : tp.NeighborClient[];
-    operations : tp.UpdateOperation[];
+    clients : T.NeighborClient[];
+    operations : T.UpdateOperation[];
     // server : Server;
-    timestamp_vector: tp.Timestamp;
+    timestamp_vector: T.Timestamp;
     update_frequency : number;
     modification_counter : number = 0;
 
-    //Ido - type management ("isDelete"/"isInsert" ....)
 
-
-    constructor(client : tp.ClientData, update_frequency : number = 1) {
+    constructor(client : T.ClientData, update_frequency : number = 1) {
         this.id = client.id;
         this.port = client.port;
         this.local_replica = client.local_replica;
@@ -31,12 +29,14 @@ class Client {
     }
     
     modify = () => {
-        let updateOP : UpdateOperation = this.operations.shift();
-        updateOP.op === "delete" ? this.remove(updateOP) : this.insert(updateOP);
+        let updateOP : T.UpdateOperation = this.operations.shift();
+        T.isDelete(updateOP) ? this.remove(updateOP) :
+        T.isInsert(updateOP) ? this.insert(updateOP):
+        console.log("unsupported operation");
 
     }
 
-    remove = (op : UpdateOperation) => {
+    remove = (op : T.DeleteOp) => {
         if (op.index === undefined || op.index < 0 || op.index >= this.local_replica.length) {
             throw new Error("Index out of bounds");
         }
@@ -45,7 +45,7 @@ class Client {
         this.incrementModificationCounter();
     }
 
-    insert = (op : UpdateOperation) => {
+    insert = (op : T.InserOp) => {
         if (op.char === undefined) 
         {
             throw new Error("Char is undefined");
