@@ -46,19 +46,16 @@ class Client {
     }
 
     insert = (op : T.InserOp) => {
+        let insertionIndex:number = op.index;
         if (op.char === undefined) 
         {
             throw new Error("Char is undefined");
-            
         }
-        if (op.index === undefined)
-        {
-            this.local_replica = this.local_replica.concat(op.char);
-        }
+        op.index === undefined && (insertionIndex = this.local_replica.length);
         if (op.index < 0 || op.index >= this.local_replica.length) {
             throw new Error("Index out of bounds");
         }
-        this.local_replica = this.local_replica.slice(0, op.index).concat(op.char, this.local_replica.slice(op.index))
+        this.local_replica = this.local_replica.slice(0, insertionIndex).concat(op.char, this.local_replica.slice(insertionIndex))
 
         this.incrementModificationCounter();
 

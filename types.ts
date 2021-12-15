@@ -6,8 +6,6 @@ export interface NeighborClient {
     port : number;
 }
 
-
-
 export interface UpdateOperation {
     opName : string;
     char? : string;
