@@ -1,15 +1,23 @@
 import * as T from "./types";
+import * as net from "net";
+import { exit } from "process";
+import { max } from "ramda";
 
-class Client {
+export class Client {
     id : number;
     port : number;
     local_replica : string;
     clients : T.NeighborClient[];
+    client_sockets : net.Socket[] = [];
     operations : T.UpdateOperation[];
-    // server : Server;
-    timestamp_vector: T.Timestamp;
+    previous_updates : T.PreviousUpdate[] = [];
+    updates_to_send : T.PreviousUpdate [] = [];
+    server : net.Server;
+    timestamp: number;
     update_frequency : number;
     modification_counter : number = 0;
+    goodbye_counter : number = 0; 
+    
 
 
     constructor(client : T.ClientData, update_frequency : number = 1) {
@@ -18,47 +26,79 @@ class Client {
         this.local_replica = client.local_replica;
         this.clients = client.clients;
         this.operations = client.operations;
-        this.timestamp_vector = [].fill(0, 0, this.clients.length + 1)
+        this.timestamp = 0;
         this.update_frequency = update_frequency;
-
+        this.server = net.createServer((socket : net.Socket) => {
+            this.client_sockets.push(socket)
+        });
+        this.server.listen(this.port);
         // init the server
     }
 
     start = () => {
+        //sleep?
+
+        this.connectToClients();
+        this.setClientsProtocol();
+        this.modify();
         
+
+    }
+
+    connectToClients = () => {
+        this.client_sockets.concat(this.clients.filter((clt:T.NeighborClient) => clt.id > this.id)
+            .map((clt:T.NeighborClient) =>
+                net.connect(clt.port, clt.client_host)
+            ));
+    };
+
+    setClientsProtocol = () =>{
+        this.client_sockets.forEach((sock : net.Socket) => {
+            sock.on("data", (data: string) =>{
+                if (data === "goodbye"){
+                   this.onGoodbye(); 
+                }else{
+                    const prevUpdate:T.PreviousUpdate[] = JSON.parse(data);
+                    // prints only for the first operation in the array
+                    console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`);
+                    this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
+                    this.merge(prevUpdate);
+                }                
+            })
+        })
     }
     
     modify = () => {
-        let updateOP : T.UpdateOperation = this.operations.shift();
-        T.isDelete(updateOP) ? this.remove(updateOP) :
-        T.isInsert(updateOP) ? this.insert(updateOP):
-        console.log("unsupported operation");
-
+        if (this.operations.length === 0) { 
+            this.onFinish();
+        }
+        else {
+            console.log(`modify - current replica: ${this.local_replica}`);//delete
+            let updateOP : T.UpdateOperation = this.operations.shift();
+            this.timestamp++;
+            T.isDelete(updateOP) ? this.local_replica = this.remove(this.local_replica,updateOP) :
+            T.isInsert(updateOP) ? this.local_replica = this.insert(this.local_replica,updateOP) :
+            console.log("unsupported operation");
+            this.previous_updates.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
+            this.updates_to_send.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
+            this.incrementModificationCounter();
+        }
     }
 
-    remove = (op : T.DeleteOp) => {
+    remove = (stringToModify:string,op : T.DeleteOp):string => {
         if (op.index === undefined || op.index < 0 || op.index >= this.local_replica.length) {
-            throw new Error("Index out of bounds");
+            return stringToModify;
         }
-
-        this.local_replica = this.local_replica.slice(0, op.index).concat(this.local_replica.slice(op.index+1));
-        this.incrementModificationCounter();
+        return stringToModify.slice(0, op.index).concat(stringToModify.slice(op.index+1));
     }
 
-    insert = (op : T.InserOp) => {
+    insert = (stringToModify:string, op : T.InsertOp):string => {
         let insertionIndex:number = op.index;
-        if (op.char === undefined) 
-        {
-            throw new Error("Char is undefined");
+        op.index === undefined && (insertionIndex = stringToModify.length);
+        if (op.index < 0 || op.index >= stringToModify.length) {
+            return stringToModify;
         }
-        op.index === undefined && (insertionIndex = this.local_replica.length);
-        if (op.index < 0 || op.index >= this.local_replica.length) {
-            throw new Error("Index out of bounds");
-        }
-        this.local_replica = this.local_replica.slice(0, insertionIndex).concat(op.char, this.local_replica.slice(insertionIndex))
-
-        this.incrementModificationCounter();
-
+        return stringToModify.slice(0, insertionIndex).concat(op.char, stringToModify.slice(insertionIndex))
     }
     
     incrementModificationCounter = () =>{
@@ -68,16 +108,55 @@ class Client {
 
     sendUpdate = ()=>{
         this.modification_counter = 0;
-        // send updates
+        this.client_sockets.map((sock : net.Socket) => {sock.write(JSON.stringify(this.updates_to_send))});
+        this.updates_to_send = [];
+        
     }
-
-    updateVector = () => {}
 
     //
-    merge = () => {}
+    merge = (prevUpdates : T.PreviousUpdate[]) => {
+        let current_string = this.local_replica;
+        console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
+        prevUpdates.forEach((prevUpdate) => {
+            const insertionIndex = this.previous_updates.findIndex((localPrevUpdate:T.PreviousUpdate) => 
+                localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
+                localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false
+                );
+        const replayOperations : T.PreviousUpdate[] = [prevUpdate].concat(this.previous_updates.slice(insertionIndex)); 
+        this.previous_updates = this.previous_updates.slice(0, insertionIndex);
+        current_string = this.previous_updates[this.previous_updates.length-1].current_string;
+        while(replayOperations.length>0){
+            let replay = replayOperations.pop();
+            current_string = this.mergify(current_string,replay.op);
+            console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
+            this.previous_updates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
+        }})
+        this.local_replica = current_string;
+        console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
+    }
 
-    // when operations list is empty send goodby special massege
+    mergify = (stringToModify : string, updateOP : T.UpdateOperation):string => 
+        T.isDelete(updateOP) ? this.remove(this.local_replica,updateOP) :
+        T.isInsert(updateOP) ? this.insert(this.local_replica,updateOP) :
+        stringToModify; // if updateOP is not supported do nothing
+    
+
+    // when operations list is empty send goodby special message
     onFinish = () => {
+        console.log(`Client <${this.id}> finished his local string modifications`);
+        this.client_sockets.forEach((sock : net.Socket) => {sock.write("goodbye")});
+        this.onGoodbye();
+    }
 
+    onGoodbye = () => {
+        this.goodbye_counter++;
+        if (this.goodbye_counter === this.clients.length + 1)
+        {
+            console.log(`Client <${this.id}> is exiting`);
+            console.log(this.local_replica) // delete
+            exit();
+        }
     }
 }
+
+export default Client;
