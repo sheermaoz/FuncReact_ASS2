@@ -35,38 +35,23 @@ export class Client {
             console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`);
             this.client_sockets.push(socket);
         });
-        // init the server
     }
 
     start = () => {
-        //sleep?
-
         this.connectToClients();
-        this.setClientsProtocol();
         this.modify();
-        
     }
 
     connectToClients = () => {
         this.clients.filter((clt:T.NeighborClient) => clt.id > this.id).forEach((clt:T.NeighborClient) => {
-            let socket = net.connect(clt.port, clt.client_host);
-            setTimeout(_=>console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`),400);
+            const socket = net.connect(clt.port, clt.client_host);
             socket.on("data", this.onData);
             this.client_sockets.push(socket);
-        })
-        
-        
-        // this.client_sockets = this.client_sockets.concat(this.clients.filter((clt:T.NeighborClient) => clt.id > this.id)
-        //     .map((clt:T.NeighborClient) =>{
-        //         let socket = net.connect(clt.port, clt.client_host);
-        //         setTimeout(_=>console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`),400);
-        //         return socket;
-            
-        //         }    ));
+        });
     };
 
     onData = (data:string)=>{
-        console.log(`client ${this.id} got msg: ${data.length}`)
+        console.log(`client ${this.id} got msg: ${data}`); // delete
         if (data == "goodbye"){
            this.onGoodbye(); 
         }else{
@@ -76,23 +61,6 @@ export class Client {
             this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
             this.merge(prevUpdate);
         }                
-    }
-
-    setClientsProtocol = () =>{
-        this.client_sockets.forEach((sock : net.Socket) => {
-            sock.on("data", (data: string) =>{
-                console.log(`client ${this.id} got msg: ${data.length}`)
-                if (data == "goodbye"){
-                   this.onGoodbye(); 
-                }else{
-                    const prevUpdate:T.PreviousUpdate[] = JSON.parse(data);
-                    // prints only for the first operation in the array
-                    console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`);
-                    this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
-                    this.merge(prevUpdate);
-                }                
-            })
-        })
     }
     
     modify = () => {
@@ -135,9 +103,11 @@ export class Client {
 
     sendUpdate = ()=>{
         this.modification_counter = 0;
-        this.client_sockets.forEach((sock : net.Socket) => {sock.write(JSON.stringify(this.updates_to_send)); console.log(`sending to remotePort ${sock.remotePort}`)});
+        this.client_sockets.forEach((sock : net.Socket) => {
+            sock.write(JSON.stringify(this.updates_to_send));
+            // console.log(`sending to remotePort ${sock.remotePort}`); // delete
+        });
         this.updates_to_send = [];
-        
     }
 
     //
@@ -171,7 +141,10 @@ export class Client {
     // when operations list is empty send goodby special message
     onFinish = () => {
         console.log(`Client <${this.id}> finished his local string modifications`);
-        this.client_sockets.forEach((sock : net.Socket) => {sock.write("goodbye"); console.log("sent goodbye to " + sock.remotePort)});
+        this.client_sockets.forEach((sock : net.Socket) => {
+            sock.write("goodbye"); 
+            // console.log("sent goodbye to " + sock.remotePort); //delete
+        });
         this.onGoodbye();
     }
 
@@ -179,22 +152,16 @@ export class Client {
 
     onGoodbye = () => {
         this.goodbye_counter++;
-        console.log(`Client ${this.id} goodbye called "goodbye" counter: ${this.goodbye_counter}`);
-        // this.gb && setTimeout(()=>{
-        //     this.closeMe();
-        // },5000); // exit fail safe - delete
-        // this.gb = false;
+
+        // console.log(`Client ${this.id} goodbye called "goodbye" counter: ${this.goodbye_counter}`); //delete
+
         if (this.goodbye_counter === this.clients.length + 1)
         {
-            console.log(`Client <${this.id}> is exiting`);
-            console.log(this.local_replica) // delete
+            console.log(`Client <${this.id}> is exiting, final replica: ${this.local_replica}`);
             this.client_sockets.forEach((sock:net.Socket)=>{sock.destroy()});
             exit();
         }
     }
-
-    // closeMe = ()=>{console.log(`Client ${this.id} final replica: ${this.local_replica}`);
-    // exit();}
 }
 
 export default Client;
