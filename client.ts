@@ -65,6 +65,7 @@ export class Client {
     
     modify = () => {
         if (this.operations.length === 0) { 
+            this.sendUpdate();
             this.onFinish();
         }
         else {
@@ -148,8 +149,6 @@ export class Client {
         this.onGoodbye();
     }
 
-    // gb:boolean = true;
-
     onGoodbye = () => {
         this.goodbye_counter++;
 
@@ -159,6 +158,11 @@ export class Client {
         {
             console.log(`Client <${this.id}> is exiting, final replica: ${this.local_replica}`);
             this.client_sockets.forEach((sock:net.Socket)=>{sock.destroy()});
+            const finalLogObject = {
+                previous_updates: this.previous_updates,
+                final_timestamp: this.timestamp,
+            };
+            console.log(finalLogObject);
             exit();
         }
     }
