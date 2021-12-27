@@ -111,7 +111,7 @@ export class Client {
         this.updates_to_send = [];
     }
 
-    //
+    // TODO: Fix Merge
     merge = (prevUpdates : T.PreviousUpdate[]) => {
         let current_string = this.local_replica;
         console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
