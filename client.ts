@@ -65,7 +65,7 @@ export class Client {
     
     modify = () => {
         if (this.operations.length === 0) { 
-            this.sendUpdate();
+            this.updates_to_send.length > 0 && this.sendUpdate();
             this.onFinish();
         }
         else {
