@@ -30,26 +30,35 @@ export class Client {
         this.updateFrequency = update_frequency;
         this.server = net.createServer();
         this.server.listen(this.localPort);
+        /**
+         * defining behavior on receiving messages and
+         * storing the new sockets for future functionality
+         */
         this.server.on('connection', (socket : net.Socket) => {
             socket.on("data", this.onData);
-            console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`);
+            // console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`); // delete
             this.client_sockets.push(socket);
         });
     }
 
+    // starting the client lifecycle
     start = () => {
         this.connectToClients();
         this.modify();
     }
 
+    // connect to all other clients as defined in assignment logic
     connectToClients = () => {
-        this.clients.filter((clt:T.NeighborClient) => clt.id > this.id).forEach((clt:T.NeighborClient) => {
+        this.clients.filter((clt:T.NeighborClient) => clt.id > this.id).
+        forEach((clt:T.NeighborClient) => {
+            // connect, define behavior and store
             const socket = net.connect(clt.port, clt.client_host);
             socket.on("data", this.onData);
             this.client_sockets.push(socket);
         });
     };
 
+    // General messaging handling protocol
     onData = (data:string)=>{
         console.log(`client ${this.id} got msg: ${data}`); // delete
         if (data == "goodbye"){
@@ -63,6 +72,7 @@ export class Client {
         }                
     }
     
+    // Apply one local update operation
     modify = () => {
         if (this.loaclOperations.length === 0) { 
             this.updatesToSend.length > 0 && this.sendUpdate();
@@ -72,15 +82,19 @@ export class Client {
             console.log(`modify - current replica: ${this.local_replica}`);//delete
             let updateOP : T.UpdateOperation = this.loaclOperations.shift();
             this.timestamp++;
+            // apply operation
             T.isDelete(updateOP) ? this.local_replica = this.remove(this.local_replica,updateOP) :
             T.isInsert(updateOP) ? this.local_replica = this.insert(this.local_replica,updateOP) :
             console.log("unsupported operation");
+            // store applied modification
             this.previousUpdates.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
+            // store applied modification for update message distribution
             this.updatesToSend.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
             this.incrementModificationCounter();
         }
     }
-
+    
+    // Apply delete operation on a given string
     remove = (stringToModify:string,op : T.DeleteOp):string => {
         if (op.index === undefined || op.index < 0 || op.index >= this.local_replica.length) {
             return stringToModify;
@@ -88,6 +102,7 @@ export class Client {
         return stringToModify.slice(0, op.index).concat(stringToModify.slice(op.index+1));
     }
 
+    // Apply insert operation on a given string
     insert = (stringToModify:string, op : T.InsertOp):string => {
         let insertionIndex:number = op.index;
         op.index === undefined && (insertionIndex = stringToModify.length);
@@ -96,7 +111,11 @@ export class Client {
         }
         return stringToModify.slice(0, insertionIndex).concat(op.char, stringToModify.slice(insertionIndex))
     }
-    
+    /**
+     * Updating the modification counter and sending
+     * update accordingly to the updateFrequency value.
+     * After all waiting 1 second and try appling the next loacl update operation.
+     */
     incrementModificationCounter = () =>{
         this.modificationCounter === this.updateFrequency - 1 ? this.sendUpdate() : this.modificationCounter+=1;
         setTimeout(this.modify, 1000);
@@ -133,13 +152,17 @@ export class Client {
         console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
     }
 
+    /**
+     * used to apply update operation during the merging procces
+     * without affecting the updates sending procedure.
+     */
     mergify = (stringToModify : string, updateOP : T.UpdateOperation):string => 
         T.isDelete(updateOP) ? this.remove(this.local_replica,updateOP) :
         T.isInsert(updateOP) ? this.insert(this.local_replica,updateOP) :
         stringToModify; // if updateOP is not supported do nothing
     
 
-    // when operations list is empty send goodby special message
+    // When the client local operations list is empty send goodby special message.
     onFinish = () => {
         console.log(`Client <${this.id}> finished his local string modifications`);
         this.client_sockets.forEach((sock : net.Socket) => {
@@ -149,6 +172,7 @@ export class Client {
         this.onGoodbye();
     }
 
+    // apply goodbye logic
     onGoodbye = () => {
         this.goodbyeCounter++;
 
@@ -157,12 +181,15 @@ export class Client {
         if (this.goodbyeCounter === this.clients.length + 1)
         {
             console.log(`Client <${this.id}> is exiting, final replica: ${this.local_replica}`);
+            // Terminate sockets before exiting the application.
             this.client_sockets.forEach((sock:net.Socket)=>{sock.destroy()});
+            // data output for development testing
             const finalLogObject = {
                 previous_updates: this.previousUpdates,
                 final_timestamp: this.timestamp,
             };
             console.log(finalLogObject);
+            
             exit();
         }
     }
