@@ -35,7 +35,7 @@ export class Client {
          * storing the new sockets for future functionality
          */
         this.server.on('connection', (socket : net.Socket) => {
-            socket.on("data", this.onData);
+            this.setSocketProtocol(socket);
             // console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`); // delete
             this.client_sockets.push(socket);
         });
@@ -53,23 +53,28 @@ export class Client {
         forEach((clt:T.NeighborClient) => {
             // connect, define behavior and store
             const socket = net.connect(clt.port, clt.client_host);
-            socket.on("data", this.onData);
+            this.setSocketProtocol(socket);
             this.client_sockets.push(socket);
         });
     };
 
-    // General messaging handling protocol
-    onData = (data:string)=>{
-        console.log(`client ${this.id} got msg: ${data}`); // delete
-        if (data == "goodbye"){
-           this.onGoodbye(); 
-        }else{
-            const prevUpdate:T.PreviousUpdate[] = JSON.parse(data);
-            // prints only for the first operation in the array
-            console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`);
-            this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
-            this.merge(prevUpdate);
-        }                
+    setSocketProtocol = (socket:net.Socket) => {
+        socket.on("update",this.onUpdateMessage);
+        socket.on("goodbye",this.onGoodbyeMessage);
+    }
+
+    // update msg protocol
+    onUpdateMessage = (updateOps: string) => {
+        const prevUpdate:T.PreviousUpdate[] = JSON.parse(updateOps);
+        // prints only for the first operation in the array
+        console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`);
+        this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
+        this.merge(prevUpdate);
+    }
+
+    // goodbye msg protocol
+    onGoodbyeMessage = () => {
+        this.onGoodbye();
     }
     
     // Apply one local update operation
@@ -111,6 +116,7 @@ export class Client {
         }
         return stringToModify.slice(0, insertionIndex).concat(op.char, stringToModify.slice(insertionIndex))
     }
+
     /**
      * Updating the modification counter and sending
      * update accordingly to the updateFrequency value.
@@ -124,7 +130,7 @@ export class Client {
     sendUpdate = ()=>{
         this.modificationCounter = 0;
         this.client_sockets.forEach((sock : net.Socket) => {
-            sock.write(JSON.stringify(this.updatesToSend));
+            sock.emit("update",JSON.stringify(this.updatesToSend));
             // console.log(`sending to remotePort ${sock.remotePort}`); // delete
         });
         this.updatesToSend = [];
@@ -159,14 +165,13 @@ export class Client {
     mergify = (stringToModify : string, updateOP : T.UpdateOperation):string => 
         T.isDelete(updateOP) ? this.remove(this.local_replica,updateOP) :
         T.isInsert(updateOP) ? this.insert(this.local_replica,updateOP) :
-        stringToModify; // if updateOP is not supported do nothing
+        stringToModify; // if updateOP is not supported do nothing    
     
-
     // When the client local operations list is empty send goodby special message.
     onFinish = () => {
         console.log(`Client <${this.id}> finished his local string modifications`);
         this.client_sockets.forEach((sock : net.Socket) => {
-            sock.write("goodbye"); 
+            sock.emit("goodbye"); 
             // console.log("sent goodbye to " + sock.remotePort); //delete
         });
         this.onGoodbye();
