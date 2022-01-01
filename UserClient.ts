@@ -6,19 +6,19 @@ import net from "net";
 //     output: process.stdout
 //   });
 
-export const serv = net.createServer();
-export let port = 8080;
-// rl.question("enter port num",(ans)=>{port=Number(ans)});
+// export const serv = net.createServer();
+// export let port = 8080;
+// // rl.question("enter port num",(ans)=>{port=Number(ans)});
 
-export const start = () => {
-    serv.listen(port);
-console.log(`listening on port ${port} `);
+// export const start = () => {
+//     serv.listen(port);
+// console.log(`listening on port ${port} `);
 
-let socket = net.connect(3000,"127.0.0.1");
-socket.on("update",(str)=>{console.log(JSON.parse(str))});
-socket.on("goodbye",(str)=>{console.log("goodbye")});
+// let socket = net.connect(3000,"127.0.0.1");
+// socket.on("update",(str)=>{console.log(JSON.parse(str))});
+// socket.on("goodbye",(str)=>{console.log("goodbye")});
 // socket.emit("goodbye");
-}
+// }
 // serv.listen(port);
 // console.log(`listening on port ${port} `);
 
@@ -106,12 +106,15 @@ export class UserClient {
         // prints only for the first operation in the array
         console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`);
         this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
-        this.merge(prevUpdate);
+        console.log(`the new timeStamp: ${this.timestamp}`);
+        console.log(`the received updates: ${prevUpdate}`);
+        // this.merge(prevUpdate);
     }
 
     // goodbye msg protocol
     onGoodbyeMessage = () => {
         this.goodbyeCounter++;
+        console.log(`current goodbye couneter value: ${this.goodbyeCounter}`);
         // this.onGoodbye();
     }
     
@@ -136,7 +139,7 @@ export class UserClient {
 
             // store applied modification for update message distribution
             this.updatesToSend.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
-            this.incrementModificationCounter();
+            // this.incrementModificationCounter();
         }
     }
     
@@ -163,13 +166,39 @@ export class UserClient {
      * update accordingly to the updateFrequency value.
      * After all waiting 1 second and try appling the next loacl update operation.
      */
-    incrementModificationCounter = () =>{
-        this.modificationCounter === this.updateFrequency - 1 ? this.sendUpdate() : this.modificationCounter+=1;
-        setTimeout(this.modify, 1000);
+    // incrementModificationCounter = () =>{
+    //     this.modificationCounter === this.updateFrequency - 1 ? this.sendUpdate() : this.modificationCounter+=1;
+    //     setTimeout(this.modify, 1000);
+    // }
+
+    addManipulation = (opName:string, index?:number, char?:string ,customId?:number, customTimestamp?:number) => {
+        let newOp:T.UpdateOperation;
+        if( opName === "insert" && char){
+            newOp = index? T.createInsertOp(char,index):T.createInsertOp(char);
+        }else if (opName === "delete" && (index || index===0)){
+            newOp = T.createDeleteOp(index);
+        }
+        if(newOp != undefined){
+            let id = this.id, ts = this.timestamp;
+            if (customId){
+                id=customId;
+            }
+            if (customTimestamp){
+                ts=customTimestamp;
+            }
+            const update = { 
+                op : newOp,
+                current_string : "",
+                timestamp : ts,
+                id: id
+            };
+            this.updatesToSend.push(update);
+            this.prevUpdatesLog.push(update);
+        }
     }
 
     sendUpdate = ()=>{
-        this.modificationCounter = 0;
+        // this.modificationCounter = 0;
         this.client_sockets.forEach((sock : net.Socket) => {
             sock.emit("update",JSON.stringify(this.updatesToSend));
             // console.log(`sending to remotePort ${sock.remotePort}`); // delete
@@ -202,29 +231,29 @@ export class UserClient {
     //     console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
     // }
 
-    merge = (prevUpdates : T.PreviousUpdate[]) => {
-        let current_string = this.local_replica;
-        console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
-        prevUpdates.forEach((prevUpdate) => {
-            const insertionIndex = this.previousUpdates.findIndex((localPrevUpdate:T.PreviousUpdate) => 
-                localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
-                localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false
-                );
-        const replayOperations : T.PreviousUpdate[] = [prevUpdate].concat(this.previousUpdates.slice(insertionIndex)); 
-        this.previousUpdates = this.previousUpdates.slice(0, insertionIndex);
-        current_string = this.previousUpdates.length > 0 ? this.previousUpdates[this.previousUpdates.length-1].current_string : this.local_replica;
-        while(replayOperations.length>0){
-            let replay = replayOperations.pop();
-            current_string = this.mergify(current_string,replay.op);
-            console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
-            this.previousUpdates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
-            // logging -delete
-            this.prevUpdatesLog.push({op : replay.op.opName, current_string : current_string, timestamp : replay.timestamp, id: replay.id});   
+    // merge = (prevUpdates : T.PreviousUpdate[]) => {
+    //     let current_string = this.local_replica;
+    //     console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
+    //     prevUpdates.forEach((prevUpdate) => {
+    //         const insertionIndex = this.previousUpdates.findIndex((localPrevUpdate:T.PreviousUpdate) => 
+    //             localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
+    //             localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false
+    //             );
+    //     const replayOperations : T.PreviousUpdate[] = [prevUpdate].concat(this.previousUpdates.slice(insertionIndex)); 
+    //     this.previousUpdates = this.previousUpdates.slice(0, insertionIndex);
+    //     current_string = this.previousUpdates.length > 0 ? this.previousUpdates[this.previousUpdates.length-1].current_string : this.local_replica;
+    //     while(replayOperations.length>0){
+    //         let replay = replayOperations.pop();
+    //         current_string = this.mergify(current_string,replay.op);
+    //         console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
+    //         this.previousUpdates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
+    //         // logging -delete
+    //         this.prevUpdatesLog.push({op : replay.op.opName, current_string : current_string, timestamp : replay.timestamp, id: replay.id});   
 
-        }})
-        this.local_replica = current_string;
-        console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
-    }
+    //     }})
+    //     this.local_replica = current_string;
+    //     console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
+    // }
 
 
     /**
@@ -243,7 +272,11 @@ export class UserClient {
             sock.emit("goodbye"); 
             // console.log("sent goodbye to " + sock.remotePort); //delete
         });
-        this.onGoodbye();
+        // this.onGoodbye();
+    }
+
+    sendGoodbye = (port:number) => {
+        console.log(`send goodbye to port ${port} sucsetion: ${this.client_sockets.find((sock:net.Socket)=>sock.remotePort===port).emit("goodbye")}`);
     }
 
 
