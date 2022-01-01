@@ -40,13 +40,15 @@ export class Client {
             this.setSocketProtocol(socket);
             // console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`); // delete
             this.client_sockets.push(socket);
+
+            this.checkNStartModify();
         });
     }
 
     // starting the client lifecycle
     start = () => {
         this.connectToClients();
-        this.modify();
+        // this.modify();
     }
 
     // connect to all other clients as defined in assignment logic
@@ -57,8 +59,15 @@ export class Client {
             const socket = net.connect(clt.port, clt.client_host);
             this.setSocketProtocol(socket);
             this.client_sockets.push(socket);
+
+            this.checkNStartModify();
         });
     };
+
+    checkNStartModify = ()=>{
+        this.client_sockets.length === this.clients.length && this.modify();
+    }
+
 
     setSocketProtocol = (socket:net.Socket) => {
         socket.on("update",this.onUpdateMessage);
