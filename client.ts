@@ -17,6 +17,8 @@ export class Client {
     updateFrequency : number;
     modificationCounter : number = 0;
     goodbyeCounter : number = 0; 
+
+    prevUpdatesLog = []; // for testing needs
     
 
 
@@ -93,6 +95,9 @@ export class Client {
             console.log("unsupported operation");
             // store applied modification
             this.previousUpdates.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
+            // logging -delete
+            this.prevUpdatesLog.push({op : updateOP.opName, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
+
             // store applied modification for update message distribution
             this.updatesToSend.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
             this.incrementModificationCounter();
@@ -137,6 +142,30 @@ export class Client {
     }
 
     // TODO: Fix Merge
+    // merge = (prevUpdates : T.PreviousUpdate[]) => {
+    //     let current_string = this.local_replica;
+    //     console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
+    //     prevUpdates.forEach((prevUpdate) => {
+    //         const insertionIndex = this.previousUpdates.findIndex((localPrevUpdate:T.PreviousUpdate) => 
+    //             localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
+    //             localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false
+    //             );
+    //     const replayOperations : T.PreviousUpdate[] = [prevUpdate].concat(this.previousUpdates.slice(insertionIndex)); 
+    //     this.previousUpdates = this.previousUpdates.slice(0, insertionIndex);
+    //     current_string = this.previousUpdates.length > 0 ? this.previousUpdates[this.previousUpdates.length-1].current_string : this.local_replica;
+    //     while(replayOperations.length>0){
+    //         let replay = replayOperations.pop();
+    //         current_string = this.mergify(current_string,replay.op);
+    //         console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
+    //         this.previousUpdates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
+    //         // logging -delete
+    //         this.prevUpdatesLog.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id});   
+
+    //     }})
+    //     this.local_replica = current_string;
+    //     console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
+    // }
+
     merge = (prevUpdates : T.PreviousUpdate[]) => {
         let current_string = this.local_replica;
         console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
@@ -153,10 +182,14 @@ export class Client {
             current_string = this.mergify(current_string,replay.op);
             console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
             this.previousUpdates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
+            // logging -delete
+            this.prevUpdatesLog.push({op : replay.op.opName, current_string : current_string, timestamp : replay.timestamp, id: replay.id});   
+
         }})
         this.local_replica = current_string;
         console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
     }
+
 
     /**
      * used to apply update operation during the merging procces
@@ -192,6 +225,7 @@ export class Client {
             const finalLogObject = {
                 previous_updates: this.previousUpdates,
                 final_timestamp: this.timestamp,
+                updateLog: this.prevUpdatesLog
             };
             console.log(finalLogObject);
             
