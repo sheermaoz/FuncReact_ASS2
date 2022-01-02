@@ -2,21 +2,20 @@ import * as T from "./types";
 import * as fs from "fs";
 import * as Clt from "./client";
 
+/**
+ * main script for parsing input and creating a client + start the client
+ */
 
-// fs.readFile(process.argv[2], (err, data) => { console.log(parse(data.toString())) });
-// fs.readFile(process.argv[2], (err, data) => { console.log(data.toString()) });
 
 const parse = (text:string):T.ClientData => {
     let lines:string[] = text.split("\r\n");
     const clientId:number = Number(lines.shift());
-    // console.log(`clientId: ${clientId}`);
     const clientPort:number = Number(lines.shift());
-    // console.log(`clientPort: ${clientPort}`);
     const initialString:string = lines.shift();
-    // console.log(`initialString: ${initialString}`);
     let neighborClients:T.NeighborClient[] = [];
     let localUpdateOps:T.UpdateOperation[] = [];
 
+    // get network clients ecept me
     lines.shift();
     let line = lines.shift();
     while(line != ""){
@@ -25,6 +24,7 @@ const parse = (text:string):T.ClientData => {
         line = lines.shift();;
     }
 
+    // parse loacl modifications
     line = lines.shift();
     while(line != ""){
         localUpdateOps.push(createUpdateOperationFromLine(line));
@@ -48,12 +48,8 @@ const createUpdateOperationFromLine = (line: string):T.UpdateOperation => {
         }
     }
 }
-let clt:Clt.Client = undefined;
+
 fs.readFile(process.argv[2], (err, data) => { 
-        clt = new Clt.Client(parse(data.toString()));
+        const clt : Clt.Client = new Clt.Client(parse(data.toString()));
         clt.start(); 
     });
-
-// const clt:Client = new Client(cltData);
-// clt.start();
-
