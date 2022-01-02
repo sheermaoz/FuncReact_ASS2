@@ -4,12 +4,13 @@ import { exit } from "process";
 import { max } from "ramda";
 
 export class Client {
+
     id : number;
     localPort : number;
     local_replica : string;
     clients : T.NeighborClient[];
     client_sockets : net.Socket[] = [];
-    loaclOperations : T.UpdateOperation[];
+    localOperations : T.UpdateOperation[];
     previousUpdates : T.PreviousUpdate[] = [];
     updatesToSend : T.PreviousUpdate [] = [];
     server : net.Server;
@@ -17,17 +18,15 @@ export class Client {
     updateFrequency : number;
     modificationCounter : number = 0;
     goodbyeCounter : number = 0; 
-
-    prevUpdatesLog = []; // for testing needs
+    minNeighbourTimestamps : Map<number,number> = new Map();
     
 
-
-    constructor(client : T.ClientData, update_frequency : number = 1) {
+    constructor(client : T.ClientData, update_frequency : number = 2) {
         this.id = client.id;
         this.localPort = client.port;
         this.local_replica = client.local_replica;
         this.clients = client.clients;
-        this.loaclOperations = client.operations;
+        this.localOperations = client.operations;
         this.timestamp = 0;
         this.updateFrequency = update_frequency;
         this.server = net.createServer();
@@ -38,9 +37,7 @@ export class Client {
          */
         this.server.on('connection', (socket : net.Socket) => {
             this.setSocketProtocol(socket);
-            // console.log(`socket.localPort: ${socket.localPort}\t socket.remotePort: ${socket.remotePort}`); // delete
             this.client_sockets.push(socket);
-
             this.checkNStartModify();
         });
     }
@@ -48,7 +45,6 @@ export class Client {
     // starting the client lifecycle
     start = () => {
         this.connectToClients();
-        // this.modify();
     }
 
     // connect to all other clients as defined in assignment logic
@@ -59,44 +55,70 @@ export class Client {
             const socket = net.connect(clt.port, clt.client_host);
             this.setSocketProtocol(socket);
             this.client_sockets.push(socket);
-
             this.checkNStartModify();
         });
     };
 
+    /**
+     * Make sure all clients are connected before starting local modifications
+     */
     checkNStartModify = ()=>{
         this.client_sockets.length === this.clients.length && this.modify();
     }
 
-
+    
     setSocketProtocol = (socket:net.Socket) => {
-        socket.on("update",this.onUpdateMessage);
-        socket.on("goodbye",this.onGoodbyeMessage);
+        socket.on("data",this.onData);
     }
 
-    // update msg protocol
+    onData = (data : String) => {
+        // buffer can include more then just one message - we're using \n as delemiter
+        const split_data = data.toString().split("\n");
+        for (let message of split_data) {
+            message != "" &&  (message == "goodbye" ? this.onGoodbyeMessage() : this.onUpdateMessage(message));
+        }
+    }
+
+    // update message protocol
     onUpdateMessage = (updateOps: string) => {
         const prevUpdate:T.PreviousUpdate[] = JSON.parse(updateOps);
         // prints only for the first operation in the array
-        console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`);
+        console.log(`Client <${this.id}> received an update operation <${prevUpdate[0].op},${prevUpdate[0].timestamp}> from client <${prevUpdate[0].id}>`); //obligatory
         this.timestamp = max(this.timestamp, prevUpdate[prevUpdate.length-1].timestamp) + 1;
         this.merge(prevUpdate);
+        this.CleanPreviousOps(prevUpdate);
     }
 
-    // goodbye msg protocol
+    // goodbye message protocol
     onGoodbyeMessage = () => {
         this.onGoodbye();
+    }
+
+    CleanPreviousOps = (prevUpdate : T.PreviousUpdate[]) => {
+        // update client (neighbor) last timestamp
+        this.minNeighbourTimestamps.set(prevUpdate[prevUpdate.length-1].id, prevUpdate[prevUpdate.length-1].timestamp);
+        // find total minimum timestamp
+        let minimum : number = Infinity;
+        this.minNeighbourTimestamps.forEach((timeStamp : number, id : number) => {timeStamp < minimum && (minimum = timeStamp);})
+        // delete all operations with timestamp less than the minimum - they are not relevant anymore
+        let prev : T.PreviousUpdate = this.previousUpdates[0];
+        while (prev.timestamp < minimum) {
+            // removed the irelevant operation
+            this.previousUpdates.shift();
+            console.log(`Client <${this.id}> removed operation <${prev.op.opName}, ${prev.timestamp}> from storage`);
+            // get the next candidate
+            prev = this.previousUpdates[0];
+        }
     }
     
     // Apply one local update operation
     modify = () => {
-        if (this.loaclOperations.length === 0) { 
+        if (this.localOperations.length === 0) { 
             this.updatesToSend.length > 0 && this.sendUpdate();
             this.onFinish();
         }
         else {
-            console.log(`modify - current replica: ${this.local_replica}`);//delete
-            let updateOP : T.UpdateOperation = this.loaclOperations.shift();
+            let updateOP : T.UpdateOperation = this.localOperations.shift();
             this.timestamp++;
             // apply operation
             T.isDelete(updateOP) ? this.local_replica = this.remove(this.local_replica,updateOP) :
@@ -104,9 +126,6 @@ export class Client {
             console.log("unsupported operation");
             // store applied modification
             this.previousUpdates.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
-            // logging -delete
-            this.prevUpdatesLog.push({op : updateOP.opName, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
-
             // store applied modification for update message distribution
             this.updatesToSend.push({op : updateOP, current_string : this.local_replica, timestamp : this.timestamp, id: this.id});
             this.incrementModificationCounter();
@@ -144,77 +163,61 @@ export class Client {
     sendUpdate = ()=>{
         this.modificationCounter = 0;
         this.client_sockets.forEach((sock : net.Socket) => {
-            sock.emit("update",JSON.stringify(this.updatesToSend));
-            // console.log(`sending to remotePort ${sock.remotePort}`); // delete
+            sock.write(JSON.stringify(this.updatesToSend) + "\n");
         });
         this.updatesToSend = [];
     }
 
-    // TODO: Fix Merge
-    // merge = (prevUpdates : T.PreviousUpdate[]) => {
-    //     let current_string = this.local_replica;
-    //     console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
-    //     prevUpdates.forEach((prevUpdate) => {
-    //         const insertionIndex = this.previousUpdates.findIndex((localPrevUpdate:T.PreviousUpdate) => 
-    //             localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
-    //             localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false
-    //             );
-    //     const replayOperations : T.PreviousUpdate[] = [prevUpdate].concat(this.previousUpdates.slice(insertionIndex)); 
-    //     this.previousUpdates = this.previousUpdates.slice(0, insertionIndex);
-    //     current_string = this.previousUpdates.length > 0 ? this.previousUpdates[this.previousUpdates.length-1].current_string : this.local_replica;
-    //     while(replayOperations.length>0){
-    //         let replay = replayOperations.pop();
-    //         current_string = this.mergify(current_string,replay.op);
-    //         console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
-    //         this.previousUpdates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
-    //         // logging -delete
-    //         this.prevUpdatesLog.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id});   
-
-    //     }})
-    //     this.local_replica = current_string;
-    //     console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
-    // }
-
+    // merge given operations to the local replica
     merge = (prevUpdates : T.PreviousUpdate[]) => {
         let current_string = this.local_replica;
-        console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`);
+        console.log(`Client <${this.id}> started merging, from <${this.timestamp}> time stamp, on <${this.local_replica}>`); //obligatory
+        // merge each received update operation
         prevUpdates.forEach((prevUpdate) => {
-            const insertionIndex = this.previousUpdates.findIndex((localPrevUpdate:T.PreviousUpdate) => 
-                localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
-                localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false
-                );
-        const replayOperations : T.PreviousUpdate[] = [prevUpdate].concat(this.previousUpdates.slice(insertionIndex)); 
-        this.previousUpdates = this.previousUpdates.slice(0, insertionIndex);
-        current_string = this.previousUpdates.length > 0 ? this.previousUpdates[this.previousUpdates.length-1].current_string : this.local_replica;
-        while(replayOperations.length>0){
-            let replay = replayOperations.pop();
-            current_string = this.mergify(current_string,replay.op);
-            console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`);
-            this.previousUpdates.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
-            // logging -delete
-            this.prevUpdatesLog.push({op : replay.op.opName, current_string : current_string, timestamp : replay.timestamp, id: replay.id});   
-
-        }})
+            // get all preceding operations to the current update operation
+            const prevToCurrent = this.previousUpdates.filter((localPrevUpdate:T.PreviousUpdate) => 
+            localPrevUpdate.timestamp < prevUpdate.timestamp ? true :
+            localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id < prevUpdate.id ? true : false);
+            // get all succeeding operations to the current update operation
+            const postToCurrent = this.previousUpdates.filter((localPrevUpdate:T.PreviousUpdate) => 
+            localPrevUpdate.timestamp>prevUpdate.timestamp ? true :
+            localPrevUpdate.timestamp == prevUpdate.timestamp && localPrevUpdate.id > prevUpdate.id ? true : false);
+            // get the newest preceding string
+            current_string = prevToCurrent.length > 0 ? prevToCurrent[prevToCurrent.length-1].current_string : prevUpdate.current_string;
+            
+            if (prevToCurrent.length != 0 ){
+                postToCurrent.unshift(prevUpdate);
+            }
+            else {
+                prevToCurrent.unshift(prevUpdate);
+            }
+            // reapply all succeeding operations
+            while(postToCurrent.length>0){
+                let replay = postToCurrent.shift();
+                current_string = this.mergify(current_string,replay.op);
+                console.log(`operation <${replay.op},${replay.timestamp}>, string: <${current_string}>`); // obligatory
+                prevToCurrent.push({op : replay.op, current_string : current_string, timestamp : replay.timestamp, id: replay.id})
+            }
+            this.previousUpdates = prevToCurrent;
+    })
         this.local_replica = current_string;
-        console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`);
+        console.log(`Client <${this.id}> ended merging with string <${this.local_replica}>, on timestamp <${this.timestamp}>`); // obligatory
     }
-
 
     /**
      * used to apply update operation during the merging procces
      * without affecting the updates sending procedure.
      */
     mergify = (stringToModify : string, updateOP : T.UpdateOperation):string => 
-        T.isDelete(updateOP) ? this.remove(this.local_replica,updateOP) :
-        T.isInsert(updateOP) ? this.insert(this.local_replica,updateOP) :
+        T.isDelete(updateOP) ? this.remove(stringToModify,updateOP) :
+        T.isInsert(updateOP) ? this.insert(stringToModify,updateOP) :
         stringToModify; // if updateOP is not supported do nothing    
     
     // When the client local operations list is empty send goodby special message.
     onFinish = () => {
-        console.log(`Client <${this.id}> finished his local string modifications`);
+        console.log(`Client <${this.id}> finished his local string modifications`); // obligatory
         this.client_sockets.forEach((sock : net.Socket) => {
-            sock.emit("goodbye"); 
-            // console.log("sent goodbye to " + sock.remotePort); //delete
+            sock.write("goodbye"); 
         });
         this.onGoodbye();
     }
@@ -223,21 +226,11 @@ export class Client {
     onGoodbye = () => {
         this.goodbyeCounter++;
 
-        // console.log(`Client ${this.id} goodbye called "goodbye" counter: ${this.goodbye_counter}`); //delete
-
         if (this.goodbyeCounter === this.clients.length + 1)
         {
-            console.log(`Client <${this.id}> is exiting, final replica: ${this.local_replica}`);
+            console.log(`Client <${this.id}> is exiting, final replica: ${this.local_replica}`); // obligatory
             // Terminate sockets before exiting the application.
-            this.client_sockets.forEach((sock:net.Socket)=>{sock.destroy()});
-            // data output for development testing
-            const finalLogObject = {
-                previous_updates: this.previousUpdates,
-                final_timestamp: this.timestamp,
-                updateLog: this.prevUpdatesLog
-            };
-            console.log(finalLogObject);
-            
+            this.client_sockets.forEach((sock:net.Socket)=>{sock.destroy()});            
             exit();
         }
     }
